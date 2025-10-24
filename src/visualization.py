@@ -2,10 +2,11 @@
 可视化模块
 提供粒子分布热力图绘制功能
 """
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 
-def visualize_heatmap(particles, L, N, T, filename='particle_heatmap.png', title_prefix=''):
+def visualize_heatmap(particles, L, N, T, filename='particle_heatmap.png', title_prefix='', output_dir='results'):
     """
     绘制粒子分布热力图
     
@@ -16,8 +17,12 @@ def visualize_heatmap(particles, L, N, T, filename='particle_heatmap.png', title
         T: 时间步数
         filename: 输出文件名
         title_prefix: 标题前缀（如 'NumPy', 'Numba'）
+        output_dir: 输出目录
     """
     print(f"Generating heatmap...")
+    
+    # 创建输出目录
+    os.makedirs(output_dir, exist_ok=True)
     
     x = particles[:, 0]
     y = particles[:, 1]
@@ -39,7 +44,9 @@ def visualize_heatmap(particles, L, N, T, filename='particle_heatmap.png', title
     plt.xlabel('X Position')
     plt.ylabel('Y Position')
     
-    plt.savefig(filename, dpi=150, bbox_inches='tight')
-    print(f"✓ Heatmap saved to {filename}")
+    # 保存到指定目录
+    filepath = os.path.join(output_dir, filename)
+    plt.savefig(filepath, dpi=150, bbox_inches='tight')
+    print(f"✓ Heatmap saved to {filepath}")
     plt.close()
 

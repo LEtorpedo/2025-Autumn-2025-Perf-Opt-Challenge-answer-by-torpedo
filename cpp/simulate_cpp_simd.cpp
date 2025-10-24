@@ -17,6 +17,7 @@
 #include <omp.h>
 #include <vector>
 #include <cstdint>
+#include <chrono>
 
 namespace py = pybind11;
 
@@ -76,6 +77,9 @@ py::tuple run_cpp_simd_simulation(int L, int N, int T, int center_min, int cente
     }
     
     long long total_dwell_steps = 0;
+    
+    // 开始核心计算计时
+    auto start_time = std::chrono::high_resolution_clock::now();
     
     // 预计算SIMD常量
     const __m256i simd_L_mask = _mm256_set1_epi32(L_mask);
@@ -168,6 +172,13 @@ py::tuple run_cpp_simd_simulation(int L, int N, int T, int center_min, int cente
         total_dwell_steps += dwell_this_step;
     }
     
+    // 计时结束
+    auto end_time = std::chrono::high_resolution_clock::now();
+    double elapsed_seconds = std::chrono::duration<double>(end_time - start_time).count();
+    
+    // 计算 dwell ratio
+    double dwell_ratio = static_cast<double>(total_dwell_steps) / (static_cast<long long>(N) * T);
+    
     // 转换结果
     py::array_t<int> result_particles({N, 2});
     auto r = result_particles.mutable_unchecked<2>();
@@ -177,7 +188,8 @@ py::tuple run_cpp_simd_simulation(int L, int N, int T, int center_min, int cente
         r(i, 1) = particles_y[i];
     }
     
-    return py::make_tuple(total_dwell_steps, result_particles);
+    // 返回 (particles, dwell_ratio, execution_time)
+    return py::make_tuple(result_particles, dwell_ratio, elapsed_seconds);
 }
 
 // Python模块定义

@@ -47,8 +47,31 @@ def run_numba_core(particles, all_moves, L, N, T, center_min, center_max, move_d
             
     return total_dwell_steps, particles
 
+def run_numba_simulation_for_benchmark(L, N, T):
+    """
+    专为 benchmark 设计的函数（不包含 warmup）
+    假设已经完成了 JIT 编译
+    """
+    # 1. 在 Python 中准备所有数据
+    particles = np.random.randint(0, L, size=(N, 2), dtype=np.int32)
+    
+    # 2. 预先生成所有随机移动
+    all_moves = np.random.randint(0, 4, size=(T, N), dtype=np.uint8)
+    
+    # 直接运行已编译的代码（不 warmup）
+    start_run_time = time.time()
+    
+    total_dwell_steps, final_particles = run_numba_core(
+        particles, all_moves, L, N, T, 
+        CENTER_MIN, CENTER_MAX, MOVE_DELTAS
+    )
+    
+    end_run_time = time.time()
+    
+    return total_dwell_steps, final_particles, (end_run_time - start_run_time)
+
 def run_numba_simulation(L, N, T):
-    """Numba 模拟的 Python 包装器"""
+    """Numba 模拟的 Python 包装器（包含 warmup）"""
     
     # 1. 在 Python 中准备所有数据
     particles = np.random.randint(0, L, size=(N, 2), dtype=np.int32)

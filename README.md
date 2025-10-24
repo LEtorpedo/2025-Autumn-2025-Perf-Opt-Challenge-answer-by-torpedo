@@ -148,15 +148,21 @@ A: 没有上限，鼓励大胆尝试各种优化手段，包括但不限于算�
 
 ### 已实现的优化方案
 
-| 实现方案 | 文件位置 | 技术栈 | 预期加速比 |
-|---------|---------|--------|-----------|
-| **Baseline** | `src/baseline/baseline.py` | 纯 Python | 1× (基准) |
-| **NumPy** | `src/numpy_process/numpy_process.py` | NumPy 向量化 | ~20× |
-| **Numba** | `src/numba_jit/numba_jit.py` | Numba JIT + 并行 | ~60× |
-| **C++ OpenMP** | `cpp/simulate_cpp_omp.cpp` | C++ + OpenMP | ~95× |
-| **C++ SIMD** | `cpp/simulate_cpp_simd.cpp` | C++ + AVX2 + OpenMP | ~900× |
-| **CUDA (Kernel)** | `cuda/random_walk_cuda.cu` | CUDA GPU (仅核函数) | ~14,000× |
-| **CUDA (Transfer)** | `cuda/random_walk_cuda.cu` | CUDA GPU (含传输) | ~3,500× |
+| 实现方案 | 文件位置 | 技术栈 | 实测时间 | 实测加速比 |
+|---------|---------|--------|---------|-----------|
+| **Baseline** | `src/baseline/baseline.py` | 纯 Python | 40.33s | 1.00× (基准) |
+| **NumPy** | `src/numpy_process/numpy_process.py` | NumPy 向量化 | 1.84s | **21.96×** |
+| **Numba** | `src/numba_jit/numba_jit.py` | Numba JIT + 并行 | 1.66s | **24.31×** |
+| **C++ OpenMP** | `cpp/simulate_cpp_omp.cpp` | C++ + OpenMP | 2.57s | **15.70×** |
+| **C++ SIMD** | `cpp/simulate_cpp_simd.cpp` | C++ + AVX2 + OpenMP | 0.82s | **49.47×** |
+| **CUDA Basic (Kernel)** | `cuda/random_walk_cuda.cu` | CUDA GPU (仅核函数) | 0.0013s | **31,937×** |
+| **CUDA Basic (Transfer)** | `cuda/random_walk_cuda.cu` | CUDA GPU (含传输) | 0.0026s | **15,571×** |
+| **CUDA Advanced (Kernel)** | `cuda/random_walk_cuda_advanced.cu` | CUDA + 块级归约 (仅核函数) | 0.0006s | **68,355×** |
+| **CUDA Advanced (Transfer)** | `cuda/random_walk_cuda_advanced.cu` | CUDA + 块级归约 (含传输) | 0.0019s | **21,512×** |
+
+> 📊 **测试环境**: Ubuntu 22.04, AMD Ryzen (16核), NVIDIA RTX 4080  
+> 📅 **测试时间**: 2025-10-24  
+> 🎯 **测试参数**: L=512, N=100,000, T=1,000
 
 ### 核心特性
 
@@ -363,17 +369,21 @@ cd ..
 python benchmark.py
 ```
 
-### 预期输出示例
+### 实际输出示例
 
 ```
+✓ Loaded system libstdc++: /usr/lib/x86_64-linux-gnu/libstdc++.so.6
+Benchmark started at: 2025-10-24 19:44:46
+Log file: results/benchmark_20251024_194446.log
+
 ############################################################
 # Performance Benchmark Suite
 # Parameters: L=512, N=100000, T=1000
 # Repeat configuration:
 #   - Baseline: 10 times
-#   - NumPy: 1000 times
-#   - Numba: 1000 times
-#   - C++: 1000 times
+#   - NumPy: 100 times
+#   - Numba: 100 times
+#   - C++: 100 times
 #   - CUDA: 1000 times
 ############################################################
 
@@ -382,29 +392,43 @@ Benchmarking: Baseline (Pure Python)
 ============================================================
 Running benchmark with L=512, N=100000, T=1000
 Repeats: 10 times
-[进度条]
-✓ Average execution time (core only): 45.2345s (±1.2345s)
-✓ Average dwell ratio: 0.2501 (±0.000123)
+────────────────────────────────────────────────────────────
+Results:
+────────────────────────────────────────────────────────────
+  Average execution time (core): 40.3266s
+  Std deviation: ±2.0468s
+  Min/Max: 37.9065s / 43.8201s
+  Average dwell ratio: 0.2508 (±0.001322)
+  Total test time: 403.27s
 
-[... 其他实现的类似输出 ...]
+[... CUDA Advanced 的输出显示最佳性能 ...]
 
-======================================================================================
-                        PERFORMANCE SUMMARY
-======================================================================================
-Implementation            Repeats      Avg Time (s)    Speedup         Avg Dwell Ratio
---------------------------------------------------------------------------------------
-Baseline (Pure Python)    10           45.2345         1.00×           0.250123
-NumPy (Vectorized)        1000         2.3456          19.28×          0.249876
-Numba (JIT + Parallel)    1000         0.6789          66.63×          0.250234
-C++ OpenMP                1000         0.4697          96.31×          0.251400
-C++ SIMD                  1000         0.0497          910.15×         0.249000
-CUDA (Kernel Only)        1000         0.0031          14,592×         0.249700
-CUDA (With Transfer)      1000         0.0128          3,534×          0.249700
-======================================================================================
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+                                            PERFORMANCE SUMMARY
+════════════════════════════════════════════════════════════════════════════════════════════════════════
+Implementation                    Repeats    Avg Time (s)    Speedup      vs Previous  Dwell Ratio
+────────────────────────────────────────────────────────────────────────────────────────────────────────
+Baseline (Pure Python)            10         40.3266         1.00×        -            0.250834
+NumPy (Vectorized)                100        1.8362          21.96×       21.96×       0.250049
+Numba (JIT + Parallel)            100        1.6592          24.31×       1.11×        0.250018
+C++ OpenMP                        100        2.5688          15.70×       0.65×        0.250049
+C++ SIMD                          100        0.8152          49.47×       3.15×        0.249010
+CUDA (Kernel Only)                1000       0.0013          31,937×      646×         0.249744
+CUDA (With Transfer)              1000       0.0026          15,571×      0.49×        0.249744
+CUDA Advanced (Kernel Only)       1000       0.0006          68,355×      4.39×        0.249744
+CUDA Advanced (With Transfer)     1000       0.0019          21,512×      0.31×        0.249744
+════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-✓ Benchmark visualization saved to: performance_benchmark.png
-✓ PDF version saved to: performance_benchmark.pdf
+✓ Benchmark visualization saved to: results/benchmark_20251024_194446.png
+✓ PDF version saved to: results/benchmark_20251024_194446.pdf
+
+✓ Benchmark complete!
+✓ Results saved to: results/
+  - Log file: results/benchmark_20251024_194446.log
+  - Figures: benchmark_20251024_194446.png/pdf
 ```
+
+**🏆 最佳性能: CUDA Advanced (Kernel Only) - 0.6ms，68,355倍加速！**
 
 ---
 

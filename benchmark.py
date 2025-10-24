@@ -3,23 +3,39 @@
 性能基准测试和可视化脚本
 对比不同实现的运行时间和加速比
 """
-import time
-import sys
 import os
+import sys
+import ctypes
+import ctypes.util
+
+# 🔧 强制加载系统的 libstdc++ (解决 CUDA 模块的 GLIBCXX_3.4.32 问题)
+# 这必须在导入任何其他模块之前完成
+try:
+    # 找到系统的 libstdc++
+    system_libstdcpp = '/usr/lib/x86_64-linux-gnu/libstdc++.so.6'
+    if os.path.exists(system_libstdcpp):
+        # 使用 RTLD_GLOBAL 全局加载，让所有后续加载的模块都使用这个版本
+        ctypes.CDLL(system_libstdcpp, mode=ctypes.RTLD_GLOBAL)
+        print(f"✓ Loaded system libstdc++: {system_libstdcpp}")
+except Exception as e:
+    print(f"Warning: Could not preload system libstdc++: {e}")
+
+import time
 import matplotlib.pyplot as plt
 import numpy as np
 from tqdm import tqdm
+from datetime import datetime
 
 # 添加 src 目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 # 导入配置
-from config import L, N, T, BENCHMARK_REPEATS
+from config import L, N, T, BENCHMARK_REPEATS, CENTER_MIN, CENTER_MAX
 
 # 导入各个实现的核心函数
 from baseline.baseline import run_baseline_core
 from numpy_process.numpy_process import run_numpy_core
-from numba_jit.numba_jit import run_numba_simulation
+from numba_jit.numba_jit import run_numba_simulation_for_benchmark, run_numba_core, MOVE_DELTAS
 
 # 尝试导入 C++ 实现
 try:
@@ -42,6 +58,16 @@ except ImportError as e:
     print("Please compile CUDA module first: cd cuda && python setup.py build_ext --inplace")
     CUDA_AVAILABLE = False
 
+# 尝试导入 CUDA Advanced 实现
+try:
+    sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'cuda'))
+    import random_walk_cuda_advanced
+    CUDA_ADVANCED_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: CUDA Advanced module not available: {e}")
+    print("Please compile CUDA Advanced module: cd cuda && python setup_advanced.py build_ext --inplace")
+    CUDA_ADVANCED_AVAILABLE = False
+
 def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_type='baseline'):
     """
     测试单个实现的性能（支持多次运行取平均）
@@ -61,13 +87,23 @@ def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_
     print(f"Benchmarking: {name}")
     print(f"{'='*60}")
     
+    warmup_time = 0
     if warmup:
         print("Warming up (JIT compilation)...")
+        warmup_start = time.time()
         try:
-            _ = func(L, N, T)
-        except:
-            pass
-        print("Warmup complete.")
+            if impl_type == 'numba':
+                # Numba warmup: 调用一次核心函数来触发 JIT 编译
+                particles = np.random.randint(0, L, size=(N, 2), dtype=np.int32)
+                all_moves = np.random.randint(0, 4, size=(T, N), dtype=np.uint8)
+                _ = run_numba_core(particles, all_moves, L, N, T, 
+                                  CENTER_MIN, CENTER_MAX, MOVE_DELTAS)
+            else:
+                _ = func(L, N, T)
+        except Exception as e:
+            print(f"Warmup error (ignored): {e}")
+        warmup_time = time.time() - warmup_start
+        print(f"Warmup complete. Time: {warmup_time:.2f}s")
     
     print(f"Running benchmark with L={L}, N={N}, T={T}")
     print(f"Repeats: {repeats} times")
@@ -104,7 +140,7 @@ def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_
             total_dwell_steps = result[0] if isinstance(result, tuple) else result
             
         elif impl_type == 'numba':
-            # Numba 内部会处理数据准备和计时
+            # Numba: 调用不包含 warmup 的版本
             result = func(L, N, T)
             total_dwell_steps = result[0]
             execution_time = result[2]  # Numba 返回内部计时
@@ -112,14 +148,13 @@ def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_
         elif impl_type == 'cpp':
             # C++ 实现返回 (particles, dwell_ratio, execution_time)
             # 函数内部已经计时核心计算部分
-            result = func(L, N, T, 0, L)  # CENTER_MIN=0, CENTER_MAX=L 用于全局统计
+            result = func(L, N, T, CENTER_MIN, CENTER_MAX)
             total_dwell_steps = int(result[1] * N * T)  # 从 dwell_ratio 反算
             execution_time = result[2]  # C++ 返回的计时
             
         elif impl_type == 'cuda':
             # CUDA 实现返回 (particles, dwell_ratio, kernel_time)
             # 只计时核函数执行
-            from config import CENTER_MIN, CENTER_MAX
             result = func(L, N, T, CENTER_MIN, CENTER_MAX)
             total_dwell_steps = int(result[1] * N * T)  # 从 dwell_ratio 反算
             execution_time = result[2]  # CUDA 核函数时间
@@ -127,7 +162,6 @@ def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_
         elif impl_type == 'cuda_with_transfer':
             # CUDA 实现返回 (particles, dwell_ratio, kernel_time, total_time)
             # 包含数据传输时间
-            from config import CENTER_MIN, CENTER_MAX
             result = func(L, N, T, CENTER_MIN, CENTER_MAX)
             total_dwell_steps = int(result[1] * N * T)  # 从 dwell_ratio 反算
             execution_time = result[3]  # CUDA 总时间（包含传输）
@@ -143,9 +177,22 @@ def benchmark_implementation(name, func, L, N, T, repeats=1, warmup=False, impl_
     avg_dwell_ratio = np.mean(dwell_ratios)
     std_execution_time = np.std(execution_times)
     std_dwell_ratio = np.std(dwell_ratios)
+    min_execution_time = np.min(execution_times)
+    max_execution_time = np.max(execution_times)
     
-    print(f"✓ Average execution time (core only): {avg_execution_time:.4f}s (±{std_execution_time:.4f}s)")
-    print(f"✓ Average dwell ratio: {avg_dwell_ratio:.4f} (±{std_dwell_ratio:.6f})")
+    print(f"\n{'─'*60}")
+    print(f"Results:")
+    print(f"{'─'*60}")
+    if warmup and warmup_time > 0:
+        print(f"  Warmup time: {warmup_time:.4f}s")
+    print(f"  Average execution time (core): {avg_execution_time:.4f}s")
+    print(f"  Std deviation: ±{std_execution_time:.4f}s")
+    print(f"  Min/Max: {min_execution_time:.4f}s / {max_execution_time:.4f}s")
+    print(f"  Average dwell ratio: {avg_dwell_ratio:.4f} (±{std_dwell_ratio:.6f})")
+    print(f"  Total test time: {np.sum(execution_times):.2f}s")
+    if warmup and warmup_time > 0:
+        print(f"  Total with warmup: {warmup_time + np.sum(execution_times):.2f}s")
+    print(f"{'─'*60}")
     
     return avg_execution_time, avg_dwell_ratio, repeats
 
@@ -211,7 +258,7 @@ def run_benchmarks():
     try:
         time_numba, ratio_numba, repeats_numba = benchmark_implementation(
             "Numba (JIT + Parallel)", 
-            run_numba_simulation, 
+            run_numba_simulation_for_benchmark, 
             L, N, T,
             repeats=BENCHMARK_REPEATS['numba'],
             warmup=True,
@@ -319,9 +366,56 @@ def run_benchmarks():
                 'time': None, 'ratio': None, 'speedup': None, 'repeats': None
             }
     
+    # 8. CUDA Advanced - 仅核函数时间 (如果可用)
+    if CUDA_ADVANCED_AVAILABLE:
+        try:
+            time_cuda_adv, ratio_cuda_adv, repeats_cuda_adv = benchmark_implementation(
+                "CUDA Advanced (Kernel)", 
+                random_walk_cuda_advanced.run_cuda_simulation_advanced, 
+                L, N, T,
+                repeats=BENCHMARK_REPEATS['cuda'],
+                impl_type='cuda'
+            )
+            results['CUDA Advanced\n(Kernel Only)'] = {
+                'time': time_cuda_adv, 
+                'ratio': ratio_cuda_adv,
+                'speedup': time_baseline / time_cuda_adv if time_baseline else None,
+                'repeats': repeats_cuda_adv
+            }
+        except Exception as e:
+            print(f"Error in CUDA Advanced (Kernel Only): {e}")
+            import traceback
+            traceback.print_exc()
+            results['CUDA Advanced\n(Kernel Only)'] = {
+                'time': None, 'ratio': None, 'speedup': None, 'repeats': None
+            }
+        
+        # 9. CUDA Advanced - 包含数据传输 (如果可用)
+        try:
+            time_cuda_adv_full, ratio_cuda_adv_full, repeats_cuda_adv_full = benchmark_implementation(
+                "CUDA Advanced (With Transfer)", 
+                random_walk_cuda_advanced.run_cuda_simulation_advanced_with_transfer, 
+                L, N, T,
+                repeats=BENCHMARK_REPEATS['cuda'],
+                impl_type='cuda_with_transfer'
+            )
+            results['CUDA Advanced\n(With Transfer)'] = {
+                'time': time_cuda_adv_full, 
+                'ratio': ratio_cuda_adv_full,
+                'speedup': time_baseline / time_cuda_adv_full if time_baseline else None,
+                'repeats': repeats_cuda_adv_full
+            }
+        except Exception as e:
+            print(f"Error in CUDA Advanced (With Transfer): {e}")
+            import traceback
+            traceback.print_exc()
+            results['CUDA Advanced\n(With Transfer)'] = {
+                'time': None, 'ratio': None, 'speedup': None, 'repeats': None
+            }
+    
     return results
 
-def visualize_results(results):
+def visualize_results(results, output_dir='results', timestamp=None):
     """绘制性能对比图表"""
     
     # 过滤掉失败的测试
@@ -339,7 +433,19 @@ def visualize_results(results):
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
     # 颜色方案（扩展以支持更多实现）
-    colors = ['#e74c3c', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c', '#e67e22', '#16a085', '#27ae60']
+    colors = [
+        '#e74c3c',  # Baseline (红)
+        '#3498db',  # NumPy (蓝)
+        '#2ecc71',  # Numba (绿)
+        '#f39c12',  # C++ OpenMP (橙)
+        '#9b59b6',  # C++ SIMD (紫)
+        '#1abc9c',  # CUDA Basic Kernel (青)
+        '#e67e22',  # CUDA Basic Transfer (深橙)
+        '#16a085',  # CUDA Advanced Kernel (深青)
+        '#27ae60',  # CUDA Advanced Transfer (深绿)
+        '#c0392b',  # 备用
+        '#8e44ad'   # 备用
+    ]
     
     # 图1: 执行时间对比 (柱状图)
     bars1 = ax1.bar(range(len(names)), times, color=colors[:len(names)], alpha=0.7, edgecolor='black')
@@ -379,41 +485,88 @@ def visualize_results(results):
     
     plt.tight_layout()
     
-    # 保存图表
-    filename = 'performance_benchmark.png'
-    plt.savefig(filename, dpi=300, bbox_inches='tight')
-    print(f"\n✓ Benchmark visualization saved to: {filename}")
+    # 生成文件名
+    if timestamp:
+        base_filename = f'benchmark_{timestamp}'
+    else:
+        base_filename = 'performance_benchmark'
     
-    # 同时保存为 PDF（可选）
-    pdf_filename = 'performance_benchmark.pdf'
-    plt.savefig(pdf_filename, format='pdf', bbox_inches='tight')
-    print(f"✓ PDF version saved to: {pdf_filename}")
+    # 保存图表
+    png_path = os.path.join(output_dir, f'{base_filename}.png')
+    pdf_path = os.path.join(output_dir, f'{base_filename}.pdf')
+    
+    plt.savefig(png_path, dpi=300, bbox_inches='tight')
+    print(f"\n✓ Benchmark visualization saved to: {png_path}")
+    
+    # 同时保存为 PDF
+    plt.savefig(pdf_path, format='pdf', bbox_inches='tight')
+    print(f"✓ PDF version saved to: {pdf_path}")
     
     plt.close()
 
 def print_summary_table(results):
     """打印性能汇总表格"""
     
-    print(f"\n{'='*110}")
-    print(f"{'PERFORMANCE SUMMARY':^110}")
-    print(f"{'='*110}")
-    print(f"{'Implementation':<25} {'Repeats':<12} {'Avg Time (s)':<15} {'Speedup':<15} {'Avg Dwell Ratio':<20}")
-    print(f"{'-'*110}")
+    print(f"\n{'='*120}")
+    print(f"{'PERFORMANCE SUMMARY':^120}")
+    print(f"{'='*120}")
+    print(f"{'Implementation':<25} {'Repeats':<10} {'Avg Time (s)':<15} {'Speedup':<12} {'vs Previous':<12} {'Dwell Ratio':<15}")
+    print(f"{'-'*120}")
     
+    prev_time = None
     for name, data in results.items():
         if data['time'] is not None:
             name_clean = name.replace('\n', ' ')
-            repeats_str = f"{data['repeats']}" if data['repeats'] else 'N/A'
+            repeats_str = f"{data['repeats']}"
             speedup_str = f"{data['speedup']:.2f}×" if data['speedup'] else 'N/A'
-            print(f"{name_clean:<25} {repeats_str:<12} {data['time']:<15.4f} {speedup_str:<15} {data['ratio']:<20.6f}")
+            
+            # 计算相对上一个实现的加速比
+            if prev_time and prev_time > 0:
+                vs_prev = prev_time / data['time']
+                vs_prev_str = f"{vs_prev:.2f}×"
+            else:
+                vs_prev_str = '-'
+            
+            print(f"{name_clean:<25} {repeats_str:<10} {data['time']:<15.4f} {speedup_str:<12} {vs_prev_str:<12} {data['ratio']:<15.6f}")
+            prev_time = data['time']
         else:
             name_clean = name.replace('\n', ' ')
-            print(f"{name_clean:<25} {'FAILED':<12} {'-':<15} {'-':<15} {'-':<20}")
+            print(f"{name_clean:<25} {'FAILED':<10} {'-':<15} {'-':<12} {'-':<12} {'-':<15}")
     
-    print(f"{'='*110}\n")
+    print(f"{'='*120}\n")
 
 def main():
     """主函数"""
+    
+    # 创建输出目录
+    results_dir = 'results'
+    os.makedirs(results_dir, exist_ok=True)
+    
+    # 生成时间戳
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # 设置日志文件
+    log_file = os.path.join(results_dir, f'benchmark_{timestamp}.log')
+    
+    # 同时输出到终端和文件
+    class Logger:
+        def __init__(self, filename):
+            self.terminal = sys.stdout
+            self.log = open(filename, 'w', encoding='utf-8')
+        
+        def write(self, message):
+            self.terminal.write(message)
+            self.log.write(message)
+            self.log.flush()
+        
+        def flush(self):
+            self.terminal.flush()
+            self.log.flush()
+    
+    sys.stdout = Logger(log_file)
+    
+    print(f"Benchmark started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Log file: {log_file}\n")
     
     # 运行基准测试
     results = run_benchmarks()
@@ -422,9 +575,16 @@ def main():
     print_summary_table(results)
     
     # 可视化结果
-    visualize_results(results)
+    visualize_results(results, results_dir, timestamp)
     
-    print("\n✓ Benchmark complete!")
+    print(f"\n✓ Benchmark complete!")
+    print(f"✓ Results saved to: {results_dir}/")
+    print(f"  - Log file: {log_file}")
+    print(f"  - Figures: benchmark_{timestamp}.png/pdf")
+    
+    # 恢复标准输出
+    sys.stdout.log.close()
+    sys.stdout = sys.stdout.terminal
 
 if __name__ == "__main__":
     main()

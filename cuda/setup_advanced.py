@@ -1,6 +1,6 @@
 """
-Setup script for CUDA Random Walk Simulation
-编译CUDA扩展模块
+Setup script for CUDA Advanced Random Walk Simulation
+编译高级优化的CUDA扩展模块
 """
 
 import os
@@ -35,10 +35,10 @@ class CMakeBuild(build_ext):
         pybind11_include = pybind11.get_include()
         
         # 源文件
-        source_file = 'random_walk_cuda.cu'
-        output_file = 'random_walk_cuda' + ('.pyd' if sys.platform == 'win32' else '.so')
+        source_file = 'random_walk_cuda_advanced.cu'
+        output_file = 'random_walk_cuda_advanced' + ('.pyd' if sys.platform == 'win32' else '.so')
         
-        # 构建nvcc命令
+        # 构建nvcc命令（高级优化选项）
         nvcc_cmd = [
             'nvcc',
             '--compiler-options', '-fPIC',
@@ -50,16 +50,18 @@ class CMakeBuild(build_ext):
             f'-I{python_include}',
             f'-I{pybind11_include}',
             '-lcudart',
-            '-L/usr/lib/x86_64-linux-gnu',  # 使用系统库路径
-            '-Xlinker', '-rpath,/usr/lib/x86_64-linux-gnu',  # 运行时库路径
+            '-L/usr/lib/x86_64-linux-gnu',
+            '-Xlinker', '-rpath,/usr/lib/x86_64-linux-gnu',
             '--expt-relaxed-constexpr',
-            # 优化选项
+            # 高级优化选项
             '-use_fast_math',
-            '--generate-code', 'arch=compute_86,code=sm_86',  # RTX 4080 (Ada架构)
-            '--ptxas-options=-v',  # 显示寄存器使用情况
+            '--generate-code', 'arch=compute_86,code=sm_86',  # RTX 4080
+            '--ptxas-options=-v',
+            '-maxrregcount=64',  # 限制寄存器使用以提高占用率
+            '--extra-device-vectorization',  # 额外的向量化
         ]
         
-        print("Compiling CUDA extension...")
+        print("Compiling CUDA Advanced extension...")
         print(f"Command: {' '.join(nvcc_cmd)}")
         
         try:
@@ -70,11 +72,11 @@ class CMakeBuild(build_ext):
             raise
 
 setup(
-    name='random_walk_cuda',
+    name='random_walk_cuda_advanced',
     version='1.0',
     author='Torpedo',
-    description='CUDA-accelerated Random Walk Simulation',
-    ext_modules=[CUDAExtension('random_walk_cuda')],
+    description='CUDA-accelerated Random Walk (Advanced Optimizations)',
+    ext_modules=[CUDAExtension('random_walk_cuda_advanced')],
     cmdclass={'build_ext': CMakeBuild},
     zip_safe=False,
     python_requires='>=3.7',

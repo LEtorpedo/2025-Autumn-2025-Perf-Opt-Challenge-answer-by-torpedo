@@ -20,9 +20,9 @@ CENTER_MAX = 3 * L // 4
 # 不同实现的重复测试次数
 BENCHMARK_REPEATS = {
     'baseline': 10,      # Baseline 运行 10 次
-    'numpy': 1000,       # NumPy 实现运行 1000 次
-    'numba': 1000,       # Numba 实现运行 1000 次
-    'cpp': 1000,         # C++ 实现运行 1000 次
+    'numpy': 100,       # NumPy 实现运行 100 次
+    'numba': 100,       # Numba 实现运行 100 次
+    'cpp': 100,         # C++ 实现运行 100 次
     'cuda': 1000,        # CUDA 实现运行 1000 次
 }
 
