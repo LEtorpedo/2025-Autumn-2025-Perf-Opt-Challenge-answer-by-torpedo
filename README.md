@@ -140,29 +140,325 @@ A: 重点关注算法逻辑的正确性，dwell ratio的数值会因随机性有
 ### Q: 优化程度有上限吗？
 A: 没有上限，鼓励大胆尝试各种优化手段，包括但不限于算法优化、并行计算、编译优化等。
 
+---
+
+## 本项目参考实现
+
+本仓库提供了一套**完整的多层次优化参考实现**，展示了从纯 Python 到 GPU 加速的性能优化路径。
+
+### 已实现的优化方案
+
+| 实现方案 | 文件位置 | 技术栈 | 预期加速比 |
+|---------|---------|--------|-----------|
+| **Baseline** | `src/baseline/baseline.py` | 纯 Python | 1× (基准) |
+| **NumPy** | `src/numpy_process/numpy_process.py` | NumPy 向量化 | ~20× |
+| **Numba** | `src/numba_jit/numba_jit.py` | Numba JIT + 并行 | ~60× |
+| **C++ OpenMP** | `cpp/simulate_cpp_omp.cpp` | C++ + OpenMP | ~95× |
+| **C++ SIMD** | `cpp/simulate_cpp_simd.cpp` | C++ + AVX2 + OpenMP | ~900× |
+| **CUDA (Kernel)** | `cuda/random_walk_cuda.cu` | CUDA GPU (仅核函数) | ~14,000× |
+| **CUDA (Transfer)** | `cuda/random_walk_cuda.cu` | CUDA GPU (含传输) | ~3,500× |
+
+### 核心特性
+
+- ✅ **完整的优化路径**：从基础到极致的性能提升演示
+- ✅ **统一测试框架**：`benchmark.py` 一键对比所有实现
+- ✅ **公平的性能测试**：只测量核心计算时间，排除初始化开销
+- ✅ **可视化支持**：自动生成性能对比图表和粒子分布热力图
+- ✅ **详细注释**：每个实现都有清晰的代码注释和说明
+
+---
+
 ## 快速开始
 
-### 环境设置
-```bash
-# 克隆仓库
-git clone https://github.com/THINKER-ONLY/2025-Autumn-2025-Perf-Opt-Challenge.git
-cd 2025-Autumn-2025-Perf-Opt-Challenge
+### 环境要求
 
-# 或手动安装依赖
+**基础环境**（必需）：
+- Ubuntu 22.04 LTS（推荐）或其他 Linux 发行版
+- Python 3.8+
+- pip 包管理器
+
+**可选环境**（用于高级优化）：
+- GCC/G++ 编译器（C++ 实现）
+- CUDA Toolkit 12.0+（GPU 加速）
+- NVIDIA GPU with Compute Capability 7.0+（GPU 加速）
+
+### 安装依赖
+
+```bash
+# 克隆或下载本仓库
+git clone https://github.com/LEtorpedo/2025-Autumn-2025-Perf-Opt-Challenge-answer-by-torpedo.git
+cd 2025-Autumn-2025-Perf-Opt-Challenge-answer-by-torpedo
+
+# 安装 Python 依赖
 pip install -r requirements.txt
 ```
+
+### 运行示例
+
+#### 1. 运行单个实现
+
+**Baseline（纯 Python）**：
+```bash
+python src/baseline/baseline.py
+```
+
+**NumPy 优化版本**：
+```bash
+python src/numpy_process/numpy_process.py
+```
+
+**Numba 优化版本**：
+```bash
+python src/numba_jit/numba_jit.py
+```
+
+#### 2. 运行完整性能测试
+
+```bash
+python benchmark.py
+```
+
+这将测试所有实现并生成：
+- 终端输出：性能统计表格
+- `performance_benchmark.png`：性能对比图表（PNG 格式）
+- `performance_benchmark.pdf`：性能对比图表（PDF 格式）
+- `particle_heatmap_*.png`：粒子分布热力图
+
+#### 3. 编译 C++ 实现（可选）
+
+```bash
+cd cpp
+python setup.py build_ext --inplace
+cd ..
+```
+
+编译成功后会生成 `.so` 文件，可被 Python 调用。
+
+#### 4. 编译 CUDA 实现（可选）
+
+```bash
+cd cuda
+python setup.py build_ext --inplace
+cd ..
+```
+
+**注意**：需要安装 CUDA Toolkit 和 pybind11。
+
+### 修改模拟参数
+
+编辑 `src/config.py` 文件：
+
+```python
+L = 512       # 网格边长
+N = 100000    # 粒子数量
+T = 1000      # 时间步数
+
+# 测试重复次数
+BENCHMARK_REPEATS = {
+    'baseline': 10,
+    'numpy': 1000,
+    'numba': 1000,
+    'cpp': 1000,
+    'cuda': 1000,
+}
+```
+
+---
 
 ## 项目结构
 
 ```
-random-walk-optimization-exam/
-├── README.md                 # 项目说明文档
-├── LICENSE                   # 开源许可证
-├── requirements.txt          # Python依赖
-├── .gitignore               # Git忽略规则
-├── src/                     # 源代码目录
-    └── __init__.py          # Python包文件
+2025-Autumn-2025-Perf-Opt-Challenge-answer-by-torpedo/
+├── README.md                           # 本文档
+├── LICENSE                             # MIT 许可证
+├── requirements.txt                    # Python 依赖列表
+├── benchmark.py                        # 统一性能测试脚本
+│
+├── src/                                # 源代码目录
+│   ├── config.py                       # 统一参数配置
+│   ├── visualization.py                # 可视化工具
+│   ├── baseline/
+│   │   └── baseline.py                 # Baseline 实现
+│   ├── numpy_process/
+│   │   └── numpy_process.py            # NumPy 优化实现
+│   └── numba_jit/
+│       └── numba_jit.py                # Numba JIT 实现
+│
+├── cpp/                                # C++ 实现
+│   ├── simulate_cpp_omp.cpp            # C++ OpenMP 版本
+│   ├── simulate_cpp_simd.cpp           # C++ SIMD 优化版本
+│   └── setup.py                        # C++ 编译脚本
+│
+└── cuda/                               # CUDA GPU 实现
+    ├── random_walk_cuda.cu             # CUDA 主实现（Python 绑定）
+    ├── kernel.cu                       # CUDA 核函数（独立版本）
+    ├── kernel_advanced.cu              # 高级 CUDA 优化
+    ├── main.cpp                        # CUDA 主机端代码
+    ├── Makefile                        # CUDA 编译脚本
+    └── setup.py                        # CUDA Python 绑定编译脚本
 ```
+
+---
+
+## 复现方法
+
+### 方法一：直接运行（推荐）
+
+适用于只想测试 Python 实现（Baseline、NumPy、Numba）：
+
+```bash
+# 1. 安装依赖
+pip install numpy numba matplotlib tqdm
+
+# 2. 运行性能测试
+python benchmark.py
+```
+
+**说明**：会自动跳过 C++ 和 CUDA 实现（如果未编译）。
+
+### 方法二：完整复现（包含 C++）
+
+```bash
+# 1. 安装系统依赖
+sudo apt update
+sudo apt install -y build-essential python3-dev
+
+# 2. 安装 Python 依赖
+pip install -r requirements.txt
+
+# 3. 编译 C++ 模块
+cd cpp
+python setup.py build_ext --inplace
+cd ..
+
+# 4. 运行完整测试
+python benchmark.py
+```
+
+### 方法三：完整复现（包含 CUDA）
+
+**前置条件**：
+- NVIDIA GPU（推荐 RTX 系列或更高）
+- CUDA Toolkit 12.0+
+
+```bash
+# 1. 验证 CUDA 环境
+nvidia-smi              # 查看 GPU 信息
+nvcc --version          # 查看 CUDA 版本
+
+# 2. 安装 Python 依赖（包含 pybind11）
+pip install -r requirements.txt
+
+# 3. 编译 C++ 模块
+cd cpp
+python setup.py build_ext --inplace
+cd ..
+
+# 4. 编译 CUDA 模块
+cd cuda
+python setup.py build_ext --inplace
+cd ..
+
+# 5. 运行完整测试
+python benchmark.py
+```
+
+### 预期输出示例
+
+```
+############################################################
+# Performance Benchmark Suite
+# Parameters: L=512, N=100000, T=1000
+# Repeat configuration:
+#   - Baseline: 10 times
+#   - NumPy: 1000 times
+#   - Numba: 1000 times
+#   - C++: 1000 times
+#   - CUDA: 1000 times
+############################################################
+
+============================================================
+Benchmarking: Baseline (Pure Python)
+============================================================
+Running benchmark with L=512, N=100000, T=1000
+Repeats: 10 times
+[进度条]
+✓ Average execution time (core only): 45.2345s (±1.2345s)
+✓ Average dwell ratio: 0.2501 (±0.000123)
+
+[... 其他实现的类似输出 ...]
+
+======================================================================================
+                        PERFORMANCE SUMMARY
+======================================================================================
+Implementation            Repeats      Avg Time (s)    Speedup         Avg Dwell Ratio
+--------------------------------------------------------------------------------------
+Baseline (Pure Python)    10           45.2345         1.00×           0.250123
+NumPy (Vectorized)        1000         2.3456          19.28×          0.249876
+Numba (JIT + Parallel)    1000         0.6789          66.63×          0.250234
+C++ OpenMP                1000         0.4697          96.31×          0.251400
+C++ SIMD                  1000         0.0497          910.15×         0.249000
+CUDA (Kernel Only)        1000         0.0031          14,592×         0.249700
+CUDA (With Transfer)      1000         0.0128          3,534×          0.249700
+======================================================================================
+
+✓ Benchmark visualization saved to: performance_benchmark.png
+✓ PDF version saved to: performance_benchmark.pdf
+```
+
+---
+
+## 性能优化技术说明
+
+### 1. NumPy 向量化
+- 使用 `np.ndarray` 替代 Python 列表
+- 布尔索引筛选中心区域粒子
+- 向量化随机数生成和位置更新
+
+### 2. Numba JIT 编译
+- `@jit(nopython=True, parallel=True)` 装饰器
+- 自动并行化（`prange`）
+- 编译为机器码执行
+
+### 3. C++ OpenMP
+- 原生 C++ 实现
+- `#pragma omp parallel for` 多线程并行
+- 编译期优化 `-O3 -march=native`
+
+### 4. C++ SIMD
+- AVX2 SIMD 指令集
+- Xorshift 快速随机数生成
+- 位运算优化取模操作
+
+### 5. CUDA GPU 加速
+- 大规模并行计算（数千 GPU 核心）
+- 设备端随机数生成
+- 局部累加减少原子操作
+- **双重计时**：区分纯计算和数据传输时间
+
+---
+
+## 故障排除
+
+### Q: 运行 benchmark.py 时提示某些模块不可用
+A: 这是正常的。如果 C++ 或 CUDA 模块未编译，会自动跳过这些实现。只测试可用的 Python 实现。
+
+### Q: C++ 编译失败
+A: 确保安装了 GCC/G++ 编译器和 Python 开发头文件：
+```bash
+sudo apt install build-essential python3-dev
+```
+
+### Q: CUDA 编译失败
+A: 检查：
+1. 是否安装 CUDA Toolkit：`nvcc --version`
+2. 是否有 NVIDIA GPU：`nvidia-smi`
+3. 是否安装 pybind11：`pip install pybind11`
+
+### Q: Numba 首次运行很慢
+A: 正常现象。Numba 首次运行需要 JIT 编译，后续运行会快很多。`benchmark.py` 已包含预热阶段。
+
+---
 
 ## 联系方式
 
@@ -175,5 +471,3 @@ random-walk-optimization-exam/
 本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情。
 
 ---
-
-**祝各位同学在考核中取得优异成绩！展现你们的技术实力和创新能力！**
